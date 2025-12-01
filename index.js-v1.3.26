@@ -1,0 +1,315 @@
+import React, {useMemo, useState} from 'react';
+import {
+    initializeBlock,
+    useBase,
+    useRecords,
+    Box,
+    Text,
+    Select,
+    Input,
+} from '@airtable/blocks/ui';
+
+function ScholarshipsViewerBlock() {
+    const base = useBase();
+
+    // --- TABLES ---
+    const institutionsTable = base.getTableByNameIfExists('Awarding Institutions');
+    const scholarshipsTable = base.getTableByNameIfExists('Scholarships Awarded');
+
+    if (!institutionsTable || !scholarshipsTable) {
+        return (
+            <Box padding={3}>
+                {!institutionsTable && (
+                    <Text size="large" textColor="red" display="block" marginBottom={2}>
+                        Error: Could not find a table named "Awarding Institutions".
+                    </Text>
+                )}
+                {!scholarshipsTable && (
+                    <Text size="large" textColor="red" display="block">
+                        Error: Could not find a table named "Scholarships Awarded".
+                    </Text>
+                )}
+            </Box>
+        );
+    }
+
+    // --- RECORD SUBSCRIPTIONS ---
+    const institutions = useRecords(institutionsTable);
+    const scholarships = useRecords(scholarshipsTable);
+
+    // --- STATE ---
+    const [selectedInstitutionId, setSelectedInstitutionId] = useState(null);
+    const [searchQuery, setSearchQuery] = useState('');
+
+    // --- FIELD CONFIG FOR GRID (from Scholarships Awarded) ---
+    const FIELD_CONFIGS = [
+        { fieldName: 'Winner Info', label: 'EntryID and Full Name' },
+        { fieldName: 'REG_FINALS', label: 'Awarded at Regionals or Finals?' },
+        { fieldName: 'City (Regionals)', label: 'Awarded at Regional City' },
+        { fieldName: 'Awarded By', label: 'Awarded By' },
+        { fieldName: 'Offer Type', label: 'Offer Type' },
+        { fieldName: 'Assistance Offered', label: 'Assistance Type Offered' },
+        { fieldName: 'Tuition Assist Offer', label: 'Tuition Assistance Offered' },
+        { fieldName: 'R&B Assist Offer', label: 'Room & Board Assistance Offered' },
+        { fieldName: 'Offer Materials', label: 'Offer Informational Materials' },
+        { fieldName: 'Notes from Awarder', label: 'Notes from Awarder' },
+        { fieldName: 'Competitor Email', label: 'Competitor Email' },
+        { fieldName: 'Studio Email', label: 'Studio Email' },
+        { fieldName: 'Parent/Coach Emails', label: 'Parent or Coach Emails' },
+        { fieldName: 'Institution Notes', label: 'Notes from the Institution' },
+        { fieldName: 'Offer Accepted?', label: 'Offer Accepted?' },
+    ];
+
+    // --- BUILD INSTITUTION DROPDOWN OPTIONS ---
+    const institutionOptions = useMemo(() => {
+        if (!institutions) return [];
+
+        const primaryField = institutionsTable.primaryField;
+
+        const opts = institutions.map(record => {
+            const label =
+                record.getCellValueAsString(primaryField) || record.id;
+
+            return {
+                value: record.id,
+                label,
+            };
+        });
+
+        // Sort alphabetically by label
+        opts.sort((a, b) => a.label.localeCompare(b.label));
+
+        return opts;
+    }, [institutions, institutionsTable]);
+
+    const selectedInstitutionRecord = useMemo(() => {
+        if (!selectedInstitutionId || !institutions) return null;
+        return institutions.find(rec => rec.id === selectedInstitutionId) || null;
+    }, [selectedInstitutionId, institutions]);
+
+    // --- FILTER SCHOLARSHIPS BY SELECTED INSTITUTION ---
+    const filteredScholarships = useMemo(() => {
+        if (!scholarships || !selectedInstitutionRecord) return [];
+
+        const instId = selectedInstitutionRecord.id;
+        const query =
+            typeof searchQuery === 'string' ? searchQuery.trim().toLowerCase() : '';
+
+        return scholarships.filter(rec => {
+            const linkValue = rec.getCellValue('Awarding Institution');
+            if (!linkValue || !Array.isArray(linkValue)) {
+                return false;
+            }
+            // Link field is an array of {id, name}
+            const isForInstitution = linkValue.some(linked => linked.id === instId);
+            if (!isForInstitution) return false;
+
+            if (!query) return true;
+
+            const winnerInfoField = scholarshipsTable.getFieldByNameIfExists('Winner Info');
+            const winnerInfoText = winnerInfoField
+                ? rec.getCellValueAsString(winnerInfoField)
+                : '';
+
+            return winnerInfoText.toLowerCase().includes(query);
+        });
+    }, [scholarships, scholarshipsTable, selectedInstitutionRecord, searchQuery]);
+
+    // --- NORMALIZE INPUT CHANGE VALUE ---
+    function handleSearchChange(newValue) {
+        // Airtable Input may send either a string or an event
+        let value = '';
+        if (typeof newValue === 'string') {
+            value = newValue;
+        } else if (newValue && newValue.target && typeof newValue.target.value === 'string') {
+            value = newValue.target.value;
+        }
+        setSearchQuery(value);
+    }
+
+    return (
+        <Box padding={3} display="flex" flexDirection="column" height="100%">
+            <Text size="xlarge" marginBottom={2} fontWeight="strong">
+                Scholarships Viewer
+            </Text>
+
+            <Text variant="paragraph" marginBottom={3}>
+                View all scholarships that were awarded to your institution here. Records in
+                this view are read-only. If you need to utilize this data for your record
+                keeping, please download your customized spreadsheet with all the awards
+                offered to your institution by clicking the button below. You may choose to
+                export a .csv or .xlsx file.
+            </Text>
+
+            {/* Institution selector + search row */}
+            <Box marginBottom={3} display="flex" flexDirection="row">
+                <Box flex="2" marginRight={2}>
+                    <Text marginBottom={1}>Select your institution:</Text>
+                    <Select
+                        options={institutionOptions}
+                        value={selectedInstitutionId}
+                        onChange={newValue => {
+                            setSelectedInstitutionId(newValue);
+                            setSearchQuery(''); // reset search when switching institutions
+                            if (newValue) {
+                                const chosen = institutions.find(rec => rec.id === newValue);
+                                if (chosen) {
+                                    const primaryField = institutionsTable.primaryField;
+                                    console.log(
+                                        'Selected institution:',
+                                        chosen.getCellValueAsString(primaryField)
+                                    );
+                                }
+                            }
+                        }}
+                        placeholder="Select an institution..."
+                        width="100%"
+                    />
+                </Box>
+
+                <Box flex="1">
+                    <Text marginBottom={1}>Search by entry / name:</Text>
+                    <Input
+                        value={searchQuery}
+                        onChange={handleSearchChange}
+                        placeholder="Type part of EntryID or full name..."
+                    />
+                </Box>
+            </Box>
+
+            {/* Currently viewing text */}
+            <Box marginBottom={2}>
+                {selectedInstitutionRecord ? (
+                    <Text>
+                        Currently viewing as:{' '}
+                        <strong>
+                            {selectedInstitutionRecord.getCellValueAsString(
+                                institutionsTable.primaryField
+                            )}
+                        </strong>
+                        {'  •  '}
+                        {filteredScholarships.length} scholarship
+                        {filteredScholarships.length === 1 ? '' : 's'} found
+                    </Text>
+                ) : (
+                    <Text>Select an institution to begin.</Text>
+                )}
+            </Box>
+
+            {/* GRID AREA */}
+            <Box
+                flex="1"
+                border="default"
+                borderRadius="large"
+                padding={2}
+                overflow="auto"
+            >
+                {!selectedInstitutionRecord ? (
+                    <Text textColor="light">
+                        Choose an institution above to see its scholarships.
+                    </Text>
+                ) : filteredScholarships.length === 0 ? (
+                    <Text textColor="light">
+                        No scholarships found for this institution (with current search).
+                    </Text>
+                ) : (
+                    <ScholarshipsGrid
+                        records={filteredScholarships}
+                        table={scholarshipsTable}
+                        fieldConfigs={FIELD_CONFIGS}
+                    />
+                )}
+            </Box>
+
+            {/* Export buttons will go here in the next step */}
+        </Box>
+    );
+}
+
+/**
+ * Simple read-only grid component for Scholarships Awarded records.
+ */
+function ScholarshipsGrid({records, table, fieldConfigs}) {
+    // Resolve actual Field objects from names once
+    const fields = useMemo(() => {
+        return fieldConfigs.map(cfg => {
+            const field = table.getFieldByNameIfExists(cfg.fieldName);
+            return {
+                ...cfg,
+                field,
+            };
+        });
+    }, [table, fieldConfigs]);
+
+    return (
+        <Box>
+            {/* Header row */}
+            <Box
+                display="flex"
+                paddingY={1}
+                paddingX={1}
+                borderBottom="thick"
+                marginBottom={1}
+                style={{position: 'sticky', top: 0, background: 'white', zIndex: 1}}
+            >
+                {fields.map(col => (
+                    <Box
+                        key={col.fieldName}
+                        flex="1"
+                        marginRight={1}
+                        style={{minWidth: 160}}
+                    >
+                        <Text size="small" fontWeight="strong">
+                            {col.label}
+                        </Text>
+                    </Box>
+                ))}
+            </Box>
+
+            {/* Data rows */}
+            {records.map(record => (
+                <Box
+                    key={record.id}
+                    display="flex"
+                    paddingY={1}
+                    paddingX={1}
+                    borderBottom="default"
+                >
+                    {fields.map(col => {
+                        const {field} = col;
+                        let displayValue = '';
+
+                        if (field) {
+                            // Special handling for attachments
+                            if (field.type === 'multipleAttachments') {
+                                const raw = record.getCellValue(field);
+                                if (Array.isArray(raw) && raw.length > 0) {
+                                    displayValue = `${raw.length} file${
+                                        raw.length === 1 ? '' : 's'
+                                    }`;
+                                } else {
+                                    displayValue = '';
+                                }
+                            } else {
+                                displayValue = record.getCellValueAsString(field) || '';
+                            }
+                        }
+
+                        return (
+                            <Box
+                                key={col.fieldName}
+                                flex="1"
+                                marginRight={1}
+                                style={{minWidth: 160}}
+                            >
+                                <Text size="small">{displayValue}</Text>
+                            </Box>
+                        );
+                    })}
+                </Box>
+            ))}
+        </Box>
+    );
+}
+
+initializeBlock(() => <ScholarshipsViewerBlock />);
