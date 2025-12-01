@@ -1,0 +1,120 @@
+import React, {useMemo, useState} from 'react';
+import {
+    initializeBlock,
+    useBase,
+    useRecords,
+    Box,
+    Text,
+    Select,
+} from '@airtable/blocks/ui';
+
+function ScholarshipsViewerBlock() {
+    const base = useBase();
+
+    // Get the Awarding Institutions table by its exact name
+    const institutionsTable = base.getTableByNameIfExists('Awarding Institutions');
+
+    // If the table isn't found, show a clear error in the UI
+    if (!institutionsTable) {
+        return (
+            <Box padding={3}>
+                <Text size="large" textColor="red">
+                    Error: Could not find a table named "Awarding Institutions".
+                </Text>
+            </Box>
+        );
+    }
+
+    // Subscribe to all records in Awarding Institutions
+    const institutions = useRecords(institutionsTable);
+
+    // Local state: which institution is selected in the dropdown
+    const [selectedInstitutionId, setSelectedInstitutionId] = useState(null);
+
+    // Build dropdown options: { value: recordId, label: institutionName }
+    const institutionOptions = useMemo(() => {
+        if (!institutions) return [];
+
+        const primaryField = institutionsTable.primaryField;
+
+        const opts = institutions.map(record => {
+            const label =
+                record.getCellValueAsString(primaryField) || record.id;
+
+            return {
+                value: record.id,
+                label,
+            };
+        });
+
+        // Sort alphabetically by label
+        opts.sort((a, b) => a.label.localeCompare(b.label));
+
+        return opts;
+    }, [institutions, institutionsTable]);
+
+    // Resolve the selected institution record for display
+    const selectedInstitutionRecord = useMemo(() => {
+        if (!selectedInstitutionId || !institutions) return null;
+        return institutions.find(rec => rec.id === selectedInstitutionId) || null;
+    }, [selectedInstitutionId, institutions]);
+
+    return (
+        <Box padding={3}>
+            <Text size="xlarge" marginBottom={2} fontWeight="strong">
+                Scholarships Viewer
+            </Text>
+
+            <Text variant="paragraph" marginBottom={3}>
+                View scholarships awarded to a partner institution and export them.
+            </Text>
+
+            {/* Institution selector */}
+            <Box marginBottom={3}>
+                <Text marginBottom={1}>View as institution:</Text>
+                <Select
+                    options={institutionOptions}
+                    value={selectedInstitutionId}
+                    onChange={newValue => {
+                        setSelectedInstitutionId(newValue);
+
+                        const chosen = institutions.find(rec => rec.id === newValue);
+                        if (chosen) {
+                            const primaryField = institutionsTable.primaryField;
+                            console.log(
+                                'Selected institution:',
+                                chosen.getCellValueAsString(primaryField)
+                            );
+                        }
+                    }}
+                    placeholder="Select an institution..."
+                    width="100%"
+                />
+            </Box>
+
+            {/* Simple feedback so you can see it's working */}
+            <Box marginTop={2}>
+                {selectedInstitutionRecord ? (
+                    <Text>
+                        Currently viewing as:{' '}
+                        <strong>
+                            {selectedInstitutionRecord.getCellValueAsString(
+                                institutionsTable.primaryField
+                            )}
+                        </strong>
+                    </Text>
+                ) : (
+                    <Text>Select an institution to begin.</Text>
+                )}
+            </Box>
+
+            {/* Next steps (future):
+                - Add Scholarships Awarded grid filtered by this institution
+                - Add sort/filter/search
+                - Add CSV/XLSX export buttons
+            */}
+        </Box>
+    );
+}
+
+initializeBlock(() => <ScholarshipsViewerBlock />);
